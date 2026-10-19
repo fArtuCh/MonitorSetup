@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Domain model, abstractions and platform-independent logic. No Win32 here. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MonitorSetup.Core.Tests" />
+  </ItemGroup>
+
+</Project>

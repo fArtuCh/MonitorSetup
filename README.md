@@ -1,39 +1,75 @@
 # MonitorSetup
-App used for managing displays: turn individual monitors on and off without unplugging them, and change everything the Windows **Display** settings page offers.
+App used for managing displays on Windows 10/11: turn individual monitors on and off without unplugging them, and change everything the Windows **Settings > System > Display** page offers.
+
+![icon](src/MonitorSetup.App/Resources/app.ico)
 
 ## Features
-- List every connected display, including ones that are currently disabled
-- Enable / disable a single display (it comes back with the same position, resolution and refresh rate)
+- List every connected display, including ones that are currently turned off
+- Enable / disable a single display; it comes back with the same position, resolution and refresh rate
 - Drag-and-drop arrangement with edge snapping
 - Main (primary) display
-- Resolution, refresh rate and orientation, with a 15 second "Keep these settings?" auto-revert
+- Resolution, refresh rate and orientation, with Windows' 15 second "Keep these display settings?" auto-revert
 - Scale (100%, 125%, ...) per display
 - HDR on/off where supported
-- Projection mode: extend, duplicate, PC screen only, second screen only
-- Identify (shows each display's number on screen)
+- Projection mode: extend, duplicate, PC screen only, second screen only (same as Win+P)
+- Identify: shows each display's number on screen
+- Command line for scripts and desktop shortcuts
+- Follows changes made elsewhere (Windows Settings, Win+P, plugging in a cable)
 
-## Build
-Requires the .NET 8 SDK (or newer) on Windows 10/11.
+## Download / publish
+Build a single self-contained `MonitorSetup.exe` (no .NET install needed on the target PC):
 
 ```
-dotnet build MonitorSetup.sln -c Release
+dotnet publish src/MonitorSetup.App -c Release -o publish
 ```
 
-The app is at `src/MonitorSetup/bin/Release/net8.0-windows/MonitorSetup.exe`.
+The result is `publish/MonitorSetup.exe`. No administrator rights are needed.
 
 ## Command line
-The same exe works from scripts and shortcuts:
+Run `MonitorSetup` without arguments to open the window, or use a command:
+
+| Command | What it does |
+| --- | --- |
+| `MonitorSetup list` | Show all connected displays and their numbers |
+| `MonitorSetup enable 3` / `disable 3` / `toggle 3` | Turn display 3 on / off / the other way round |
+| `MonitorSetup primary 2` | Make display 2 the main display |
+| `MonitorSetup mode 1 3840 2160 60` | Resolution and refresh rate |
+| `MonitorSetup rotate 2 portrait` | `landscape`, `portrait`, `landscapeflipped`, `portraitflipped` |
+| `MonitorSetup scale 1 125` | Scale in percent |
+| `MonitorSetup move 2 3840 0` | Position on the desktop |
+| `MonitorSetup project extend` | `extend`, `duplicate`, `pconly`, `secondonly` |
+
+Tip: a desktop shortcut to `MonitorSetup.exe toggle 3` turns a monitor on and off with a double click.
+
+## Development
+Requires the .NET 10 SDK.
 
 ```
-MonitorSetup list
-MonitorSetup disable 3
-MonitorSetup enable 3
-MonitorSetup mode 1 3840 2160 60
-MonitorSetup move 2 3840 0
-MonitorSetup primary 2
+dotnet build MonitorSetup.sln
+dotnet test MonitorSetup.sln
 ```
 
-## How it works
-Displays are read and switched on/off with the CCD API (`QueryDisplayConfig` / `SetDisplayConfig`).
-Resolution, refresh rate, orientation, position and primary display use `ChangeDisplaySettingsEx`.
-Scale uses the same (undocumented) `DisplayConfigSetDeviceInfo` call as the Windows Settings app.
+### Architecture
+Clean (onion) architecture; dependencies point inwards only.
+
+```
+MonitorSetup.App ──────────────► MonitorSetup.Core ◄────── MonitorSetup.Infrastructure.Windows
+(WinForms UI, CLI,               (models, interfaces,       (Win32 implementations:
+ composition root)                display rules)              CCD API, GDI, JSON store)
+```
+
+| Project | Responsibility |
+| --- | --- |
+| `MonitorSetup.Core` | Domain model (`DisplayInfo`, `DisplayId`, ...), small role interfaces (`IDisplayReader`, `IDisplayTopology`, `IDisplayModeSetter`, `IDisplayPositioner`, `IDisplayScaleSetter`, `IHdrSetter`, `IProjectionSwitcher`, `IDisplayConfigurationSnapshots`, `IDisplayStateStore`) and platform-independent services: `DisplayPowerService` (remember/restore layout on disable/enable), `DisplayLayoutService` (keeps the main display at 0,0), `ArrangementSnapper`. No Win32 code. |
+| `MonitorSetup.Infrastructure.Windows` | One class per interface, wrapping `QueryDisplayConfig` / `SetDisplayConfig` (enable, disable, projection, snapshots), `ChangeDisplaySettingsEx` (mode, orientation, position, primary), `DisplayConfigGet/SetDeviceInfo` (names, HDR, and the undocumented DPI scale calls the Settings app uses). `AddWindowsDisplayServices()` registers everything. |
+| `MonitorSetup.App` | Composition root (`Microsoft.Extensions.DependencyInjection`). UI uses Model-View-Presenter: `MainForm` is a passive `IMainView`, `MainPresenter` holds the logic. The CLI is a set of `ICliCommand` classes, so a new command is a new class and one registration. |
+| `MonitorSetup.Core.Tests` | xUnit tests for the Core services against in-memory fakes. |
+
+How the SOLID principles show up:
+- **S**: each Win32 concern is its own class (reader, topology, mode setter, positioner, ...); the form only renders, the presenter only decides.
+- **O**: new CLI commands or new display features are added as new classes without editing existing ones.
+- **L**: any `IDisplayReader`/`IDisplayTopology`/... implementation can replace another; the tests use in-memory fakes.
+- **I**: many small role interfaces instead of one big display manager.
+- **D**: Core and the presenter depend on interfaces; only the composition root knows about Win32 classes.
+
+The icon is generated by `tools/make-icon.ps1`.
